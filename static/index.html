@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF Editor</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #202124;
+        background: #f8f9fa;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      button, input { font: inherit; }
+      button { cursor: pointer; }
+      .topbar {
+        height: 64px; display: flex; align-items: center; gap: 14px;
+        padding: 0 24px; background: #fff; border-bottom: 1px solid #e4e7eb;
+      }
+      .brand { color: #202124; font-size: 18px; font-weight: 650; white-space: nowrap; }
+      .file-name { overflow: hidden; color: #5f6368; text-overflow: ellipsis; white-space: nowrap; }
+      .toolbar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+      .tool-button, .page-number {
+        height: 36px; padding: 0 11px; border: 1px solid #dadce0; border-radius: 7px;
+        color: #3c4043; background: #fff;
+      }
+      .tool-button:hover { background: #f1f3f4; }
+      .tool-button.primary { color: #fff; border-color: #1a73e8; background: #1a73e8; }
+      .tool-button.primary:hover { background: #1765cc; }
+      .tool-button:disabled { cursor: default; opacity: .5; }
+      .page-number { width: 54px; text-align: center; }
+      .page-count, .zoom-label { color: #5f6368; white-space: nowrap; }
+      #workspace { height: calc(100vh - 64px); display: flex; flex-direction: column; }
+      .edit-tip {
+        min-height: 43px; display: flex; align-items: center; justify-content: center;
+        padding: 8px 14px; color: #5f6368; background: #fff; border-bottom: 1px solid #e4e7eb;
+      }
+      #canvasArea {
+        flex: 1; overflow: auto; padding: 28px 24px 60px;
+        background: #f1f3f4; text-align: center;
+      }
+      #pageSurface {
+        position: relative; display: block; margin: 0 auto; overflow: visible;
+        background: white; box-shadow: 0 2px 12px #20212430;
+      }
+      #pageImage { display: block; width: 100%; height: 100%; }
+      #textLayer { position: absolute; inset: 0; }
+      .text-hit {
+        position: absolute; overflow: visible; padding: 0; border: 1px solid transparent;
+        border-radius: 2px; color: transparent; background: transparent;
+        text-align: left; white-space: pre; line-height: 1;
+      }
+      .text-hit:hover, .text-hit:focus-visible {
+        border-color: #4285f4; outline: none; background: #4285f41a;
+      }
+      .inline-edit {
+        position: absolute; z-index: 2; display: flex; align-items: center; gap: 4px;
+        height: 34px; min-width: 190px; padding: 3px; border: 1px solid #4285f4;
+        border-radius: 5px; background: white; box-shadow: 0 2px 8px #20212438;
+      }
+      .inline-edit input { width: 100%; min-width: 0; padding: 3px 5px; border: 0; outline: none; }
+      .inline-edit button { padding: 3px 6px; border: 0; border-radius: 3px; color: white; background: #1a73e8; }
+      .inline-edit button.cancel { color: #3c4043; background: #f1f3f4; }
+      #status {
+        position: fixed; z-index: 5; bottom: 18px; left: 50%; transform: translateX(-50%);
+        max-width: calc(100vw - 32px); padding: 9px 15px; border-radius: 7px;
+        color: #fff; background: #32363c; box-shadow: 0 2px 10px #2021242e;
+      }
+      #status:empty { display: none; }
+      #startScreen { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+      .upload-card {
+        width: min(100%, 560px); padding: 42px; border: 1px solid #e0e3e7;
+        border-radius: 16px; background: white; box-shadow: 0 8px 30px #2021240d;
+      }
+      .upload-card h1 { margin: 0 0 8px; font-size: 27px; }
+      .upload-card p { color: #5f6368; }
+      .drop-zone {
+        display: grid; min-height: 180px; place-items: center; margin-top: 24px;
+        padding: 20px; border: 2px dashed #c5ccd3; border-radius: 12px;
+        color: #5f6368; text-align: center; cursor: pointer;
+      }
+      .drop-zone.dragging { border-color: #1a73e8; background: #e8f0fe; }
+      .drop-zone input { display: none; }
+      .drop-icon { display: block; margin-bottom: 8px; color: #1a73e8; font-size: 30px; }
+      .small { font-size: 12px; }
+      [hidden] { display: none !important; }
+      @media (max-width: 760px) {
+        .topbar { gap: 8px; padding: 0 10px; }
+        .brand { font-size: 16px; }
+        .file-name { display: none; }
+        .toolbar { gap: 4px; }
+        .tool-button { padding: 0 8px; }
+        #canvasArea { padding: 16px 8px 50px; }
+      }
+      @media (max-width: 450px) {
+        .zoom-label, #zoomOut, #zoomIn { display: none; }
+        .topbar { height: 56px; }
+        #workspace { height: calc(100vh - 56px); }
+        .edit-tip { font-size: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <section id="startScreen">
+      <div class="upload-card">
+        <div class="brand">PDF Editor</div>
+        <h1>Edit right on the page</h1>
+        <p>Open a PDF, click text in the page preview, and change it in place. Your original stays untouched.</p>
+        <label id="dropZone" class="drop-zone" for="pdfFile">
+          <span>
+            <span class="drop-icon" aria-hidden="true">↑</span>
+            <strong>Choose a PDF or drop it here</strong>
+            <span class="small" style="display:block;margin-top:6px">PDF, up to 25 MB</span>
+          </span>
+          <input id="pdfFile" type="file" accept="application/pdf,.pdf">
+        </label>
+      </div>
+    </section>
+
+    <section id="workspace" hidden>
+      <header class="topbar">
+        <div class="brand">PDF Editor</div>
+        <div id="fileName" class="file-name"></div>
+        <nav class="toolbar" aria-label="Document controls">
+          <button id="prevPage" class="tool-button" type="button" aria-label="Previous page">‹</button>
+          <input id="pageNumber" class="page-number" type="number" min="1" value="1" aria-label="Page number">
+          <span class="page-count">/ <span id="pageCount">1</span></span>
+          <button id="nextPage" class="tool-button" type="button" aria-label="Next page">›</button>
+          <span class="zoom-label">Zoom</span>
+          <button id="zoomOut" class="tool-button" type="button" aria-label="Zoom out">−</button>
+          <button id="zoomIn" class="tool-button" type="button" aria-label="Zoom in">+</button>
+          <a id="download" class="tool-button primary" href="#" hidden>Download PDF</a>
+          <button id="openAnother" class="tool-button" type="button">Open PDF</button>
+        </nav>
+      </header>
+      <div class="edit-tip">Click text to edit it; Enter saves and Escape cancels. The original font size and style are preserved.</div>
+      <main id="canvasArea">
+        <div id="pageSurface">
+          <img id="pageImage" alt="PDF page preview">
+          <div id="textLayer"></div>
+        </div>
+      </main>
+    </section>
+    <input id="anotherFile" type="file" accept="application/pdf,.pdf" hidden>
+    <div id="status" role="status" aria-live="polite"></div>
+
+    <script>
+      const startScreen = document.querySelector("#startScreen");
+      const workspace = document.querySelector("#workspace");
+      const fileInput = document.querySelector("#pdfFile");
+      const anotherFile = document.querySelector("#anotherFile");
+      const statusBox = document.querySelector("#status");
+      const pageSurface = document.querySelector("#pageSurface");
+      const pageImage = document.querySelector("#pageImage");
+      const textLayer = document.querySelector("#textLayer");
+      const downloadLink = document.querySelector("#download");
+
+      let fileId = null;
+      let page = 1;
+      let pageCount = 1;
+      let zoom = 1.15;
+      let currentPageData = null;
+      let editing = false;
+
+      async function api(url, options) {
+        const response = await fetch(url, options);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "The request could not be completed.");
+        return data;
+      }
+
+      function showStatus(message) {
+        statusBox.textContent = message;
+      }
+
+      function selectedFile(file) {
+        if (!file || (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf")) {
+          showStatus("Choose a PDF file.");
+          return;
+        }
+        if (file.size > 25 * 1024 * 1024) {
+          showStatus("PDF files must be 25 MB or smaller.");
+          return;
+        }
+        uploadFile(file);
+      }
+
+      async function uploadFile(file) {
+        showStatus("Opening PDF…");
+        const form = new FormData();
+        form.append("file", file);
+        try {
+          const result = await api("/api/files", { method: "POST", body: form });
+          fileId = result.file_id;
+          pageCount = result.page_count;
+          page = 1;
+          document.querySelector("#fileName").textContent = result.filename;
+          document.querySelector("#pageCount").textContent = pageCount;
+          startScreen.hidden = true;
+          workspace.hidden = false;
+          downloadLink.hidden = true;
+          await renderPage();
+          showStatus("PDF ready. Click text on the page to edit.");
+          window.setTimeout(() => { statusBox.textContent = ""; }, 3200);
+        } catch (error) {
+          showStatus(error.message);
+        }
+      }
+
+      function setPageSize(width, height) {
+        const maxWidth = Math.max(280, Math.min(window.innerWidth - 48, 920));
+        const displayWidth = Math.min(width * zoom, maxWidth);
+        pageSurface.style.width = `${displayWidth}px`;
+        pageSurface.style.height = `${displayWidth * height / width}px`;
+      }
+
+      function beginInlineEdit(span, target) {
+        if (editing) return;
+        editing = true;
+        const bounds = target.getBoundingClientRect();
+        const surfaceBounds = pageSurface.getBoundingClientRect();
+        const editor = document.createElement("form");
+        editor.className = "inline-edit";
+        editor.style.left = `${bounds.left - surfaceBounds.left}px`;
+        editor.style.top = `${bounds.top - surfaceBounds.top - 3}px`;
+        editor.style.fontSize = `${Math.max(11, span.font_size * pageSurface.clientWidth / currentPageData.width)}px`;
+        editor.innerHTML = '<input aria-label="Replace this text"><button type="submit">Save</button><button class="cancel" type="button">Cancel</button>';
+        const input = editor.querySelector("input");
+        input.value = span.text;
+        textLayer.append(editor);
+        input.focus();
+        input.select();
+
+        const finish = () => {
+          editor.remove();
+          editing = false;
+        };
+        editor.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const replacement = input.value;
+          const saveButton = editor.querySelector('button[type="submit"]');
+          saveButton.disabled = true;
+          showStatus("Saving edit…");
+          try {
+            const result = await api(`/api/files/${fileId}/replace-at`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                page,
+                bbox: span.bbox,
+                replacement,
+              }),
+            });
+            fileId = result.file_id;
+            downloadLink.href = result.download_url;
+            downloadLink.download = `edited-${result.filename}`;
+            downloadLink.hidden = false;
+            finish();
+            await renderPage();
+            showStatus("Edit saved. Download your updated PDF whenever you're ready.");
+          } catch (error) {
+            saveButton.disabled = false;
+            showStatus(error.message);
+            input.focus();
+          }
+        });
+        editor.querySelector(".cancel").addEventListener("click", () => {
+          finish();
+          target.focus();
+        });
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            finish();
+            target.focus();
+          }
+        });
+      }
+
+      async function renderPage() {
+        editing = false;
+        document.querySelector("#pageNumber").value = page;
+        document.querySelector("#prevPage").disabled = page <= 1;
+        document.querySelector("#nextPage").disabled = page >= pageCount;
+        textLayer.replaceChildren();
+        const [data] = await Promise.all([
+          api(`/api/files/${fileId}/text?page=${page}`),
+          new Promise((resolve, reject) => {
+            pageImage.onload = resolve;
+            pageImage.onerror = () => reject(new Error("Could not render this PDF page."));
+            pageImage.src = `/api/files/${fileId}/pages/${page}/preview?v=${Date.now()}`;
+          }),
+        ]);
+        currentPageData = data.pages[0];
+        setPageSize(currentPageData.width, currentPageData.height);
+        textLayer.replaceChildren();
+        for (const span of currentPageData.spans) {
+          const [x0, y0, x1, y1] = span.bbox;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "text-hit";
+          button.textContent = span.text;
+          button.title = `Edit: ${span.text}`;
+          button.setAttribute("aria-label", `Edit text: ${span.text}`);
+          button.style.left = `${x0 / currentPageData.width * 100}%`;
+          button.style.top = `${y0 / currentPageData.height * 100}%`;
+          button.style.width = `${Math.max(.4, (x1 - x0) / currentPageData.width * 100)}%`;
+          button.style.height = `${Math.max(.5, (y1 - y0) / currentPageData.height * 100)}%`;
+          button.style.fontSize = `${span.font_size / currentPageData.height * 100}%`;
+          button.addEventListener("click", () => beginInlineEdit(span, button));
+          textLayer.append(button);
+        }
+        if (!currentPageData.spans.length) {
+          showStatus("This page has no selectable text. Scanned PDFs need OCR before their text can be edited.");
+        }
+      }
+
+      fileInput.addEventListener("change", () => selectedFile(fileInput.files[0]));
+      anotherFile.addEventListener("change", () => selectedFile(anotherFile.files[0]));
+      document.querySelector("#openAnother").addEventListener("click", () => anotherFile.click());
+      document.querySelector("#prevPage").addEventListener("click", async () => {
+        if (page > 1) { page -= 1; await renderPage(); }
+      });
+      document.querySelector("#nextPage").addEventListener("click", async () => {
+        if (page < pageCount) { page += 1; await renderPage(); }
+      });
+      document.querySelector("#pageNumber").addEventListener("change", async (event) => {
+        const requested = Number.parseInt(event.target.value, 10);
+        if (Number.isInteger(requested)) {
+          page = Math.max(1, Math.min(pageCount, requested));
+          await renderPage();
+        }
+      });
+      document.querySelector("#zoomOut").addEventListener("click", async () => {
+        zoom = Math.max(.65, zoom - .15);
+        if (currentPageData) setPageSize(currentPageData.width, currentPageData.height);
+      });
+      document.querySelector("#zoomIn").addEventListener("click", async () => {
+        zoom = Math.min(2.4, zoom + .15);
+        if (currentPageData) setPageSize(currentPageData.width, currentPageData.height);
+      });
+      document.querySelector("#dropZone").addEventListener("dragover", (event) => {
+        event.preventDefault();
+        event.currentTarget.classList.add("dragging");
+      });
+      document.querySelector("#dropZone").addEventListener("dragleave", (event) => {
+        event.currentTarget.classList.remove("dragging");
+      });
+      document.querySelector("#dropZone").addEventListener("drop", (event) => {
+        event.preventDefault();
+        event.currentTarget.classList.remove("dragging");
+        selectedFile(event.dataTransfer.files[0]);
+      });
+      window.addEventListener("resize", () => {
+        if (currentPageData) setPageSize(currentPageData.width, currentPageData.height);
+      });
+    </script>
+  </body>
+</html>
